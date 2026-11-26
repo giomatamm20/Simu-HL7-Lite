@@ -123,6 +123,7 @@ function premiumMessage(feature) {
   $("premium-description").textContent="Esta función requiere la versión Premium. No está habilitada en la edición Lite.";
   $("premium-dialog").showModal();
 }
+window.showLitePremium=premiumMessage;
 document.addEventListener("click",event=>{const button=event.target.closest("[data-premium]");if(!button) return;event.preventDefault();event.stopPropagation();premiumMessage(button.dataset.premium);},true);
 $("compact-navigation").onchange=event=>{const value=event.target.value;if(value==="pacs"||value==="dicom"){premiumMessage(value==="pacs" ? "Simulador PACS" : "Simulador DICOM");event.target.value=document.body.dataset.page;}else showPage(value);};
 $("scan-form").onsubmit=event=>{event.preventDefault();run(async()=>{const identifier=$("scan-id").value.trim();const order=state.orders.find(item=>item.sampleId===identifier||item.orderId===identifier);if(!order)throw new Error("La muestra no existe en Worklist.");await api(`/api/orders/${encodeURIComponent(order.orderId)}/load`,"POST",{});await refresh();selectOrder(order.orderId);feedback("Muestra cargada. Ingresa los valores manualmente.");},event.submitter);};

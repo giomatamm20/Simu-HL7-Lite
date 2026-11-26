@@ -58,7 +58,7 @@ Usa un solo worker; cada instancia abre un listener MLLP.
 1. Configura el destino en **Configurar equipo**: host y puerto de tu receptor.
 2. En **Perfil del equipo → Campos del mensaje**, revisa los segmentos, sus
    campos/componentes y el origen de cada valor. La vista previa usa datos ficticios.
-3. Pulsa **Guardar y activar diseño**. Sin un diseño activado el equipo queda
+3. Pulsa **Guardar cambios**. Sin un diseño activado el equipo queda
    en **STANDBY**; con el diseño válido y sin órdenes pendientes queda en **IDLE**.
 4. En **Operar muestras**, crea una orden con datos ficticios, ID de muestra,
    código/nombre de estudio y pruebas. También puedes recibir una orden por MLLP.
@@ -76,10 +76,10 @@ código, nombre, tipo numérico `NM` o texto `ST`/`TX`, unidad, referencia y ban
 manual. Se incluyen cinco ejemplos iniciales, sin límite de cantidad ni de
 selección por orden. No hay generadores automáticos para las órdenes.
 
-La pestaña conserva las tarjetas de analitos de la edición completa: permite
+El perfil reutiliza las hojas de estilo y la distribución del espacio de trabajo original (barra superior, pestañas, editor y vista previa). La pestaña conserva las tarjetas de analitos de la edición completa: permite
 editar sus datos en línea, buscar resultados, incluir/desactivar, añadir,
 ordenar y consultar **Detalles** para ver qué campos del mensaje utilizan esos
-datos. **Guardar analitos** aplica el catálogo completo. Los códigos usados en
+datos. **Guardar cambios** aplica el catálogo completo. Los códigos usados en
 órdenes se conservan para mantener su trazabilidad; puedes desactivarlos.
 La columna de generadores automáticos, los grupos repetibles y las
 importaciones permanecen visibles con aviso Premium.
@@ -102,7 +102,7 @@ La vista previa permite elegir un analito, los primeros tres o todo el catálogo
 Muestra los segmentos y la relación **campo → origen → valor del ejemplo**.
 Los ejemplos no crean resultados de órdenes ni envían mensajes.
 
-**Guardar y activar** reemplaza el único diseño existente. No guarda copias ni
+**Guardar cambios** reemplaza el único diseño existente. No guarda copias ni
 una biblioteca; importar, exportar, guardar diseños adicionales y el diseñador
 semántico permanecen Premium. Un borrador inválido no sustituye el diseño activo.
 Cambiar la selección de segmentos o de analitos en la vista previa tampoco

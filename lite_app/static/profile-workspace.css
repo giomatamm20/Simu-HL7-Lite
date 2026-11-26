@@ -1,0 +1,20 @@
+/* Reuse the full simulator's workspace. Only Lite capability differences here. */
+body[data-page=protocol] main>.metrics,body[data-page=protocol] main>#feedback,body[data-page=protocol] .app-footer{display:none}
+body[data-page=protocol] .sidebar{height:100dvh}.equipment-profile .ws-top .ws-brand .lite-badge{margin-left:8px}
+#profileWorkshop #profile-save-status{flex:1}#profileWorkshop .ep-parameter{box-shadow:none}#profileWorkshop .ep-parameter [data-name]{font-weight:600}
+#profileWorkshop .ep-parameter .manual-note{padding:0;border:0;background:none;font-size:11px;line-height:1.5;margin:4px 0;color:var(--ws-muted)}
+#profileWorkshop .mapping-table{min-width:390px!important}#profileWorkshop .ws-tree .ws-node small{display:block}#profileWorkshop .ws-tree .ws-node .ws-cardinality{margin-left:auto}
+#profileWorkshop .ws-foot>input{width:80px}#profileWorkshop .assembly-values{padding:0;max-height:240px}#profileWorkshop .assembly-line{white-space:pre;display:block}
+#profileWorkshop #design-preview{font:11px/1.85 Consolas,monospace;white-space:pre;word-break:normal;overflow:auto;padding:14px;background:var(--ws-code);color:#dceef2;border-radius:0}
+#profileWorkshop .assembly-line.selected{background:#2b4854;border-left:0;padding-left:0}#profileWorkshop .ep-study-controls .row[hidden]{display:none}
+#profileWorkshop .ep-parameter select[data-premium-select]{background:var(--ws-surface);color:var(--ws-ink)}
+#profileWorkshop [role=tabpanel][hidden]{display:none!important}
+#profileWorkshop #design-catalog{display:flex;flex-direction:column;overflow:visible;scrollbar-gutter:auto}
+
+body[data-page=protocol] .sidebar .nav .premium-label{display:none}
+@media(max-width:1340px){
+ #profileWorkshop[data-tab=studies]{height:auto}
+ #profileWorkshop[data-tab=studies] .ws-grid{grid-template-rows:auto auto}
+ #profileWorkshop[data-tab=studies] .ep-editor{max-height:none}
+ #profileWorkshop[data-tab=studies] .ws-preview{max-height:45dvh}
+}

@@ -11,6 +11,7 @@ FILES = (
     "lite_app/static/index.html", "lite_app/static/original.css", "lite_app/static/style.css", "lite_app/static/app.js",
     "lite_app/static/design-editor.js", "lite_app/static/design-editor.css",
     "lite_app/static/catalog-editor.js", "lite_app/static/catalog-editor.css",
+    "lite_app/static/original-workshop.css", "lite_app/static/original-equipment-profile.css", "lite_app/static/profile-workspace.css",
     "samples/order-glucose.hl7", "tests/test_lite.py", "tools/package.py",
 )
 
