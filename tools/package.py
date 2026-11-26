@@ -19,7 +19,8 @@ def package():
         source = ROOT / name
         if source.is_symlink() or not source.resolve().is_relative_to(ROOT):
             raise ValueError("Source outside Lite: " + name)
-        content[name] = source.read_bytes()
+        # All allowlisted files are text; stable newlines keep hashes portable.
+        content[name] = source.read_bytes().replace(b"\r\n", b"\n")
     manifest = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in sorted(content.items()))
     content["MANIFEST.sha256"] = manifest.encode("ascii")
     destination = ROOT / "dist"
