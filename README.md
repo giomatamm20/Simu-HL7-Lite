@@ -76,6 +76,14 @@ código, nombre, tipo numérico `NM` o texto `ST`/`TX`, unidad, referencia y ban
 manual. Se incluyen cinco ejemplos iniciales, sin límite de cantidad ni de
 selección por orden. No hay generadores automáticos para las órdenes.
 
+La pestaña conserva las tarjetas de analitos de la edición completa: permite
+editar sus datos en línea, buscar resultados, incluir/desactivar, añadir,
+ordenar y consultar **Detalles** para ver qué campos del mensaje utilizan esos
+datos. **Guardar analitos** aplica el catálogo completo. Los códigos usados en
+órdenes se conservan para mantener su trazabilidad; puedes desactivarlos.
+La columna de generadores automáticos, los grupos repetibles y las
+importaciones permanecen visibles con aviso Premium.
+
 Si cambias los valores visibles, debes preparar nuevamente el ORU antes de
 enviarlo. Cambiar un analito usado, la identidad HL7 o el diseño invalida la
 preparación anterior de las órdenes pendientes; los mensajes ya aceptados

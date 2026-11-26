@@ -267,6 +267,31 @@ class LiteCase(unittest.TestCase):
         self.assertIn('OBX|1|ST|TXT^Texto de prueba||DEMO',response.json()['raw'])
         self.assertNotIn('GLU^Glucosa',response.json()['raw'])
 
+    def test_catalog_cards_can_save_order_and_disable_analites(self):
+        state=self.state()
+        tests=list(reversed(state['catalog']))
+        next(test for test in tests if test['code']=='GLU')['enabled']=False
+        response=self.client.put('/api/catalog/batch',json={'tests':tests,'expectedHash':state['catalogHash']})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual([test['code'] for test in self.state()['catalog']],['WBC','HGB','CREA','UREA','GLU'])
+        response=self.client.post('/api/orders',json={'patientId':'P','patientName':'DEMO','tests':['GLU']})
+        self.assertEqual(response.status_code,400)
+        self.assertIn('MSA|AR|',mllp.send('127.0.0.1',self.port,ORDER))
+
+    def test_catalog_cannot_remove_an_analite_used_in_orders(self):
+        self.create()
+        state=self.state()
+        response=self.client.put('/api/catalog/batch',json={'tests':[test for test in state['catalog'] if test['code']!='GLU'],'expectedHash':state['catalogHash']})
+        self.assertEqual(response.status_code,400)
+        self.assertEqual(self.state()['catalog'],state['catalog'])
+
+    def test_catalog_batch_does_not_overwrite_concurrent_changes(self):
+        state=self.state()
+        self.client.put('/api/catalog',json={'code':'ALT','name':'ALT','unit':'U/L'})
+        response=self.client.put('/api/catalog/batch',json={'tests':state['catalog'],'expectedHash':state['catalogHash']})
+        self.assertEqual(response.status_code,400)
+        self.assertIn('ALT',[test['code'] for test in self.state()['catalog']])
+
     def test_cross_origin_write_is_blocked(self):
         self.assertEqual(self.client.put("/api/profile", json=DEFAULT_PROFILE, headers={"Origin": "https://example.invalid"}).status_code, 403)
         self.assertEqual(self.client.put("/api/profile", content="{}", headers={"Content-Type": "text/plain"}).status_code, 415)

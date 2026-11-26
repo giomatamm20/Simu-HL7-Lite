@@ -122,7 +122,7 @@ def order_from_message(raw, catalog):
     if not placer or (field(orc, 2) and field(obr, 2) and field(orc, 2) != field(obr, 2)):
         raise ValueError("Se requiere un identificador consistente en ORC-2 / OBR-2.")
     code = field(obr, 4).split("^")[0]
-    if code not in {test['code'] for test in catalog}:
+    if code not in {test['code'] for test in catalog if test.get('enabled', True)}:
         raise ValueError("Agrega primero la prueba al catálogo: " + code)
     study = field(obr, 4).split("^")
     return {"orderId": placer, "sampleId": field(obr, 3) or placer, "studyCode": study[0],

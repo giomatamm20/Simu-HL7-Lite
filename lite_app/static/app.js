@@ -65,6 +65,7 @@ function render() {
   $("equipment-reason").textContent=state.equipment.reason;
   $("order-form").querySelector('button[type="submit"]').disabled=!state.equipment.configured;
   window.liteDesignEditor?.update(state);
+  window.liteCatalogEditor?.update(state);
   for(const id of ["order-analyzer","config-analyzer"]) { const option=document.createElement("option"); option.textContent=state.profile.name; option.value="lite"; $(id).replaceChildren(option); }
   const signature=JSON.stringify(state.catalog);
   if(signature!==catalogSignature) { renderTests(); renderCatalog(); catalogSignature=signature; }
@@ -96,12 +97,9 @@ async function refresh(initial=false) { state=await api("/api/state"); if(initia
 function renderTests() {
   const checked=new Set([...$("test-options").querySelectorAll("input:checked")].map(input=>input.value));
   $("test-options").replaceChildren();
-  for(const test of state.catalog) { const label=document.createElement("label"); const input=document.createElement("input"); input.type="checkbox"; input.name="tests"; input.value=test.code; input.checked=checked.has(test.code); label.append(input,document.createTextNode(test.code)); $("test-options").append(label); }
+  for(const test of state.catalog.filter(test=>test.enabled!==false)) { const label=document.createElement("label"); const input=document.createElement("input"); input.type="checkbox"; input.name="tests"; input.value=test.code; input.checked=checked.has(test.code); label.append(input,document.createTextNode(test.code)); $("test-options").append(label); }
 }
-function renderCatalog() {
-  $("catalog-list").replaceChildren();
-  for(const test of state.catalog) { const row=document.createElement("tr"); cell(row,test.code); cell(row,test.name); cell(row,test.valueType||"NM"); cell(row,test.unit); actionButton(row,"Editar",()=>{$("test-code").value=test.code; $("test-name").value=test.name; $("test-unit").value=test.unit; $("test-type").value=test.valueType||"NM"; $("test-reference").value=test.reference||""; $("test-flag").value=test.flag||""; $("test-name").focus();}); $("catalog-list").append(row); }
-}
+function renderCatalog() { window.liteCatalogEditor?.update(state); }
 async function run(operation, button) {
   if(busy) return;
   busy=true; if(button) button.disabled=true;
@@ -141,7 +139,6 @@ $("result-form").onsubmit=event=>{event.preventDefault();run(async()=>{
 $("send-order").onclick=event=>run(async()=>{const response=await api(`/api/orders/${encodeURIComponent(selectedId)}/send`,"POST",{values:visibleValues()});feedback(response.detail,response.status!=="ACCEPTED");},event.target);
 $("refresh").onclick=event=>run(async()=>feedback("Registro actualizado."),event.target);
 $("profile-form").onsubmit=event=>{event.preventDefault();run(async()=>{await api("/api/profile","PUT",{name:$("profile-name").value,application:$("profile-application").value,facility:$("profile-facility").value,destinationHost:$("destination-host").value,destinationPort:Number($("destination-port").value)}); feedback("Perfil guardado.");},event.submitter);};
-$("catalog-form").onsubmit=event=>{event.preventDefault();run(async()=>{await api("/api/catalog","PUT",{code:$("test-code").value,name:$("test-name").value,unit:$("test-unit").value,valueType:$("test-type").value,reference:$("test-reference").value,flag:$("test-flag").value}); feedback("Analito guardado. Ya puedes seleccionarlo en una orden y ver su OBX en el diseño."); $("catalog-form").reset();},event.submitter);};
 $("validate").onclick=event=>run(async()=>{const response=await api("/api/validate","POST",{raw:$("raw").value}); $("validation").textContent=response.valid ? "Estructura básica válida dentro del alcance Lite." : response.errors.join(" ");},event.target);
 $("send-raw").onclick=event=>run(async()=>{const response=await api("/api/send","POST",{raw:$("raw").value}); $("raw-ack").textContent=display(response.ack); feedback(response.detail,response.status!=="ACCEPTED");},event.target);
 // Locked features only display this notice; no Premium API is called.

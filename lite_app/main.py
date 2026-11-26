@@ -91,6 +91,7 @@ class CatalogTest(Model):
     valueType: Literal["NM", "ST", "TX"] = "NM"
     reference: str = Field(default="", max_length=100)
     flag: Literal["", "N", "L", "H", "LL", "HH", "A"] = ""
+    enabled: bool = True
 
     @field_validator("name", "unit", "reference")
     @classmethod
@@ -98,6 +99,11 @@ class CatalogTest(Model):
         if any(ord(char) < 32 for char in value):
             raise ValueError("No se admiten caracteres de control.")
         return value
+
+
+class CatalogBatch(Model):
+    tests: list[CatalogTest] = Field(min_length=1)
+    expectedHash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class Message(Model):
@@ -296,6 +302,7 @@ def create_app(db_path=None, listen_host=None, listen_port=None):
     def state():
         return {"edition": "Lite", "profile": demo().store.profile(), "catalog": demo().store.catalog(),
                 "design": demo().store.design(), "designSources": design.SOURCES, "equipment": demo().equipment(),
+                "catalogHash": demo().store.catalog_hash(),
                 "orders": demo().store.orders(), "messages": demo().store.messages(),
                 "listener": {"host": demo().listener.server_address[0], "port": demo().listener.server_address[1], "active": demo().thread.is_alive()},
                 "limits": {"profiles": 1, "designs": 1, "tests": None, "manualResults": True},
@@ -324,8 +331,8 @@ def create_app(db_path=None, listen_host=None, listen_port=None):
     @app.post("/api/orders")
     def create_order(payload: ManualOrder):
         order = payload.model_dump()
-        if not set(order['tests']).issubset({test['code'] for test in demo().store.catalog()}):
-            raise HTTPException(400, "Agrega primero las pruebas al catálogo.")
+        if not set(order['tests']).issubset({test['code'] for test in demo().store.catalog() if test.get('enabled', True)}):
+            raise HTTPException(400, "Selecciona pruebas activas del catálogo.")
         action(demo().require_design)
         for key in ("orderId", "patientId", "patientName", "sampleId", "studyCode", "studyName"):
             order[key] = hl7.scalar(order[key])
@@ -335,6 +342,10 @@ def create_app(db_path=None, listen_host=None, listen_port=None):
     @app.put("/api/catalog")
     def save_test(payload: CatalogTest):
         return demo().store.save_test(payload.model_dump())
+
+    @app.put("/api/catalog/batch")
+    def save_catalog(payload: CatalogBatch):
+        return action(demo().store.replace_catalog, [test.model_dump() for test in payload.tests], payload.expectedHash)
 
     @app.post("/api/orders/{identifier:path}/load")
     def load(identifier: str):

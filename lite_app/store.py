@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sqlite3
 import threading
+import hashlib
 from .hl7 import CATALOG
 from .design import default_design
 
@@ -67,6 +68,32 @@ class Store:
     def catalog(self):
         with self.lock:
             return [json.loads(row[0]) for row in self.connection.execute("SELECT data FROM catalog ORDER BY rowid")]
+
+    def catalog_hash(self):
+        return hashlib.sha256(json.dumps(self.catalog(), sort_keys=True).encode()).hexdigest()
+
+    def replace_catalog(self, tests, expected_hash):
+        with self.transaction() as db:
+            if self.catalog_hash() != expected_hash:
+                raise ValueError("El catálogo cambió en otra sesión. Recarga la página antes de guardar.")
+            orders = self.orders()
+            if any(order['status'] == 'SENDING' for order in orders):
+                raise ValueError("Espera a que termine el envío antes de modificar los analitos.")
+            previous = {test['code']: test for test in self.catalog()}
+            updated = {test['code']: test for test in tests}
+            if len(updated) != len(tests):
+                raise ValueError("Cada analito necesita un código único.")
+            if not any(test.get('enabled', True) for test in tests):
+                raise ValueError("Mantén al menos un analito activo para poder probar el mensaje.")
+            removed = set(previous) - set(updated)
+            if any(removed.intersection(order['tests']) for order in orders):
+                raise ValueError("No puedes quitar o renombrar un código usado en órdenes. Puedes desactivar el analito.")
+            for code in previous.keys() & updated.keys():
+                if previous[code] != updated[code]:
+                    self.invalidate("Analito modificado: vuelve a preparar el resultado.", code=code)
+            db.execute("DELETE FROM catalog")
+            db.executemany("INSERT INTO catalog VALUES (?,?)", [(test['code'], json.dumps(test)) for test in tests])
+        return {"catalog": self.catalog(), "catalogHash": self.catalog_hash()}
 
     def save_test(self, test):
         with self.transaction() as db:
