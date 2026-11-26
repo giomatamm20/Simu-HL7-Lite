@@ -124,7 +124,9 @@ def order_from_message(raw, catalog):
     code = field(obr, 4).split("^")[0]
     if code not in {test['code'] for test in catalog}:
         raise ValueError("Agrega primero la prueba al catálogo: " + code)
-    return {"orderId": placer, "sampleId": field(obr, 3) or placer,
+    study = field(obr, 4).split("^")
+    return {"orderId": placer, "sampleId": field(obr, 3) or placer, "studyCode": study[0],
+            "studyName": study[1] if len(study) > 1 else study[0],
             "patientId": field(pid, 3), "patientName": field(pid, 5), "tests": [code], "source": "MLLP"}
 
 

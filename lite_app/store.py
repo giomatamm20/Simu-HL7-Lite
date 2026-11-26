@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 import threading
 from .hl7 import CATALOG
+from .design import default_design
 
 DEFAULT_PROFILE = {"name": "Analizador Lite", "application": "SIM_LITE", "facility": "DEMO",
                    "destinationHost": "127.0.0.1", "destinationPort": 2575}
@@ -27,6 +28,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS catalog (code TEXT PRIMARY KEY, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS design (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL,
+                    configured INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, created TEXT NOT NULL,
                     direction TEXT NOT NULL, raw TEXT NOT NULL, ack TEXT NOT NULL,
                     status TEXT NOT NULL, detail TEXT NOT NULL);
@@ -34,6 +37,7 @@ class Store:
                     raw TEXT NOT NULL, ack TEXT NOT NULL, PRIMARY KEY(sender, control));
             """)
             db.execute("INSERT OR IGNORE INTO profile VALUES (1, ?)", (json.dumps(DEFAULT_PROFILE),))
+            db.execute("INSERT OR IGNORE INTO design(id,data) VALUES (1,?)", (json.dumps(default_design()),))
             for test in CATALOG:
                 db.execute("INSERT OR IGNORE INTO catalog VALUES (?, ?)", (test['code'], json.dumps(test)))
             # Interrupted network sends must be reviewable and retryable after restart.
@@ -66,9 +70,31 @@ class Store:
 
     def save_test(self, test):
         with self.transaction() as db:
+            old = db.execute("SELECT data FROM catalog WHERE code=?", (test['code'],)).fetchone()
             db.execute("INSERT INTO catalog VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET data=excluded.data",
                        (test['code'], json.dumps(test)))
+            if old and json.loads(old[0]) != test:
+                self.invalidate("Analito modificado: vuelve a preparar el resultado.", code=test['code'])
         return test
+
+    def design(self):
+        with self.lock:
+            row = self.connection.execute("SELECT data,configured,revision FROM design WHERE id=1").fetchone()
+            return {"configuration": json.loads(row[0]), "configured": bool(row[1]), "revision": row[2]}
+
+    def save_design(self, configuration):
+        with self.transaction() as db:
+            if any(order['status'] == 'SENDING' for order in self.orders()):
+                raise ValueError("Espera a que termine el envío antes de modificar el diseño.")
+            db.execute("UPDATE design SET data=?,configured=1,revision=revision+1 WHERE id=1", (json.dumps(configuration),))
+            self.invalidate("Diseño actualizado: vuelve a preparar el resultado.")
+        return self.design()
+
+    def invalidate(self, reason, code=None):
+        for order in self.orders():
+            if order['status'] == 'READY' and (code is None or code in order['tests']):
+                order.update(status="DRAFT", lastError=reason)
+                self.save_order(order)
 
     def profile(self):
         with self.lock:
@@ -76,7 +102,12 @@ class Store:
 
     def save_profile(self, profile):
         with self.transaction() as db:
+            previous = self.profile()
+            if any(order['status'] == 'SENDING' for order in self.orders()):
+                raise ValueError("Espera a que termine el envío antes de modificar el equipo.")
             db.execute("UPDATE profile SET data=? WHERE id=1", (json.dumps(profile),))
+            if any(previous[key] != profile[key] for key in ('application', 'facility')):
+                self.invalidate("Identidad HL7 modificada: vuelve a preparar el resultado.")
         return profile
 
     def orders(self):

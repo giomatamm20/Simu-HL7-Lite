@@ -7,8 +7,9 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = (
     ".dockerignore", ".gitignore", ".github/workflows/tests.yml", "README.md",
     "Dockerfile", "compose.yaml", "requirements.txt", "requirements-dev.txt",
-    "lite_app/__init__.py", "lite_app/hl7.py", "lite_app/main.py", "lite_app/mllp.py", "lite_app/store.py",
+    "lite_app/__init__.py", "lite_app/hl7.py", "lite_app/main.py", "lite_app/mllp.py", "lite_app/store.py", "lite_app/design.py",
     "lite_app/static/index.html", "lite_app/static/original.css", "lite_app/static/style.css", "lite_app/static/app.js",
+    "lite_app/static/design-editor.js", "lite_app/static/design-editor.css",
     "samples/order-glucose.hl7", "tests/test_lite.py", "tools/package.py",
 )
 

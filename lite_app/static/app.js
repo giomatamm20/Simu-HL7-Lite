@@ -5,7 +5,7 @@ let selectedMessage = null;
 let busy = false;
 let catalogSignature = "";
 const $ = id => document.getElementById(id);
-const statusNames = {PENDING:"Pendiente",READY:"Resultado listo",SENDING:"Enviando",SENT:"Aceptada (AA)",RECEIVED:"Recibido",REJECTED:"Rechazado",ACCEPTED:"Aceptado (AA)",ERROR:"Error",DUPLICATE:"Repetido",INVALID:"Inválido"};
+const statusNames = {PENDING:"Pendiente",DRAFT:"Requiere preparación",SAMPLE_LOADED:"Muestra cargada",READY:"Resultado listo",SENDING:"Enviando",SENT:"Aceptada (AA)",RECEIVED:"Recibido",REJECTED:"Rechazado",ACCEPTED:"Aceptado (AA)",ERROR:"Error",DUPLICATE:"Repetido",INVALID:"Inválido"};
 function feedback(message, error=false) { $("feedback").textContent = message; $("feedback").className = error ? "feedback error" : "feedback"; }
 async function api(path, method="GET", body) {
   const response = await fetch(path, {method, headers: {"Content-Type":"application/json"}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
@@ -32,20 +32,25 @@ function selectOrder(identifier) {
   for (const code of order.tests) {
     const test=state.catalog.find(item=>item.code===code);
     const label=document.createElement("label"); label.textContent=`${test.name} (${test.unit})`;
-    const input=document.createElement("input"); input.name=code; input.type="text"; input.inputMode="decimal"; input.required=true; input.maxLength=30; input.value=order.values[code] || ""; input.autocomplete="off"; input.disabled=["SENT","SENDING"].includes(order.status); label.append(input); $("result-inputs").append(label);
+    const input=document.createElement("input"); input.name=code; input.type="text"; input.inputMode=(test.valueType||"NM")==="NM"?"decimal":"text"; input.required=true; input.maxLength=(test.valueType||"NM")==="NM"?30:1000; input.value=order.values[code] || ""; input.autocomplete="off"; input.disabled=["SENT","SENDING"].includes(order.status); input.oninput=()=>showPreview(state.orders.find(item=>item.orderId===selectedId)); label.append(input); $("result-inputs").append(label);
   }
   $("result-form").querySelector("button").disabled=["SENT","SENDING"].includes(order.status);
   showPreview(order);
 }
 function showPreview(order) {
+  const visible=visibleValues();
+  const dirty=!!order.rawResult&&order.tests.some(code=>visible[code]!==String(order.values[code]??""));
   $("selected-label").textContent=`${order.orderId} · ${order.patientName} · ${statusNames[order.status] || order.status}`;
-  $("result-form").querySelector("button").disabled=["SENT","SENDING"].includes(order.status);
+  $("result-form").querySelector("button").disabled=!state.equipment.configured||["SENT","SENDING"].includes(order.status);
   $("preview-panel").hidden=!order.rawResult;
   $("result-preview").textContent=display(order.rawResult);
-  $("send-order").disabled=order.status!=="READY" || busy;
+  $("send-order").disabled=order.status!=="READY" || busy || dirty || !state.equipment.configured;
+  $("result-dirty").hidden=!dirty&&!order.lastError;
+  $("result-dirty").textContent=dirty?"Cambiaste los valores: vuelve a preparar el ORU. El mensaje anterior no se enviará con estos cambios pendientes.":order.lastError||"";
 }
+function visibleValues(){return Object.fromEntries([...$("result-inputs").querySelectorAll("input")].map(input=>[input.name,input.value]));}
 function render() {
-  $("metric-listeners").textContent="1";
+  $("metric-listeners").textContent=state.listener.active?"1":"0";
   $("metric-pending").textContent=state.orders.filter(order=>order.status!=="SENT").length;
   $("metric-messages").textContent=state.messages.length;
   $("metric-errors").textContent=state.messages.filter(message=>["ERROR","REJECTED","INVALID"].includes(message.status)).length;
@@ -53,10 +58,13 @@ function render() {
   $("equipment-listener").textContent=`HL7 / MLLP · Listener activo · ${state.listener.host}:${state.listener.port}`;
   $("equipment-destination").textContent=`Destino: ${state.profile.destinationHost}:${state.profile.destinationPort}`;
   $("equipment-tests").textContent=`${state.catalog.length} pruebas configuradas · Sin límite de catálogo`;
-  const equipmentState=state.orders.some(order=>order.status==="SENDING") ? "SENDING_RESULT" : state.orders.some(order=>order.status==="READY") ? "RESULT_READY" : "IDLE";
+  const equipmentState=state.equipment.state;
   $("equipment-state").textContent=equipmentState;
   $("equipment-state").className="state " + equipmentState;
-  $("equipment-progress").style.width=equipmentState==="RESULT_READY" ? "100%" : "0%";
+  $("equipment-progress").parentElement.hidden=true;
+  $("equipment-reason").textContent=state.equipment.reason;
+  $("order-form").querySelector('button[type="submit"]').disabled=!state.equipment.configured;
+  window.liteDesignEditor?.update(state);
   for(const id of ["order-analyzer","config-analyzer"]) { const option=document.createElement("option"); option.textContent=state.profile.name; option.value="lite"; $(id).replaceChildren(option); }
   const signature=JSON.stringify(state.catalog);
   if(signature!==catalogSignature) { renderTests(); renderCatalog(); catalogSignature=signature; }
@@ -92,7 +100,7 @@ function renderTests() {
 }
 function renderCatalog() {
   $("catalog-list").replaceChildren();
-  for(const test of state.catalog) { const row=document.createElement("tr"); cell(row,test.code); cell(row,test.name); cell(row,test.unit); actionButton(row,"Editar",()=>{$("test-code").value=test.code; $("test-name").value=test.name; $("test-unit").value=test.unit; $("test-name").focus();}); $("catalog-list").append(row); }
+  for(const test of state.catalog) { const row=document.createElement("tr"); cell(row,test.code); cell(row,test.name); cell(row,test.valueType||"NM"); cell(row,test.unit); actionButton(row,"Editar",()=>{$("test-code").value=test.code; $("test-name").value=test.name; $("test-unit").value=test.unit; $("test-type").value=test.valueType||"NM"; $("test-reference").value=test.reference||""; $("test-flag").value=test.flag||""; $("test-name").focus();}); $("catalog-list").append(row); }
 }
 async function run(operation, button) {
   if(busy) return;
@@ -109,6 +117,7 @@ function showPage(name) {
   document.querySelectorAll(".page").forEach(page=>page.hidden=page.id!==entry[0]);
   document.querySelectorAll(".nav [data-page-link]").forEach(button=>button.classList.toggle("active",button.dataset.pageLink===pageName));
   $("page-title").textContent=entry[1]; $("compact-navigation").value=pageName;
+  if(pageName==="protocol") window.liteDesignEditor?.setTab(name==="catalog"?"catalog":"fields");
 }
 document.querySelectorAll("[data-page-link]").forEach(button=>button.onclick=()=>showPage(button.dataset.pageLink));
 function premiumMessage(feature) {
@@ -118,25 +127,26 @@ function premiumMessage(feature) {
 }
 document.addEventListener("click",event=>{const button=event.target.closest("[data-premium]");if(!button) return;event.preventDefault();event.stopPropagation();premiumMessage(button.dataset.premium);},true);
 $("compact-navigation").onchange=event=>{const value=event.target.value;if(value==="pacs"||value==="dicom"){premiumMessage(value==="pacs" ? "Simulador PACS" : "Simulador DICOM");event.target.value=document.body.dataset.page;}else showPage(value);};
-$("scan-form").onsubmit=event=>{event.preventDefault();const identifier=$("scan-id").value.trim();const order=state.orders.find(item=>item.sampleId===identifier||item.orderId===identifier);if(order){selectOrder(order.orderId);feedback("Muestra cargada. Ingresa los valores manualmente.");}else feedback("La muestra no existe en Worklist.",true);};
+$("scan-form").onsubmit=event=>{event.preventDefault();run(async()=>{const identifier=$("scan-id").value.trim();const order=state.orders.find(item=>item.sampleId===identifier||item.orderId===identifier);if(!order)throw new Error("La muestra no existe en Worklist.");await api(`/api/orders/${encodeURIComponent(order.orderId)}/load`,"POST",{});await refresh();selectOrder(order.orderId);feedback("Muestra cargada. Ingresa los valores manualmente.");},event.submitter);};
 $("order-form").onsubmit=event=>{event.preventDefault();run(async()=>{
   const tests=[...$("test-options").querySelectorAll("input:checked")].map(input=>input.value);
   if(!tests.length) throw new Error("Selecciona al menos una prueba.");
-  const order=await api("/api/orders","POST",{orderId:$("order-id").value,patientId:$("patient-id").value,patientName:$("patient-name").value,tests});
+  const order=await api("/api/orders","POST",{orderId:$("order-id").value,sampleId:$("sample-id").value,studyCode:$("study-code").value,studyName:$("study-name").value,patientId:$("patient-id").value,patientName:$("patient-name").value,tests});
   await refresh(); selectOrder(order.orderId); feedback("Orden creada. Ingresa los valores manualmente.");
 },event.submitter);};
 $("result-form").onsubmit=event=>{event.preventDefault();run(async()=>{
-  const values=Object.fromEntries([...$("result-inputs").querySelectorAll("input")].map(input=>[input.name,input.value]));
+  const values=visibleValues();
   await api(`/api/orders/${encodeURIComponent(selectedId)}/results`,"POST",{values}); feedback("ORU preparado. Revisa la vista previa y envíalo cuando estés listo.");
 },event.submitter);};
-$("send-order").onclick=event=>run(async()=>{const response=await api(`/api/orders/${encodeURIComponent(selectedId)}/send`,"POST",{});feedback(response.detail,response.status!=="ACCEPTED");},event.target);
+$("send-order").onclick=event=>run(async()=>{const response=await api(`/api/orders/${encodeURIComponent(selectedId)}/send`,"POST",{values:visibleValues()});feedback(response.detail,response.status!=="ACCEPTED");},event.target);
 $("refresh").onclick=event=>run(async()=>feedback("Registro actualizado."),event.target);
 $("profile-form").onsubmit=event=>{event.preventDefault();run(async()=>{await api("/api/profile","PUT",{name:$("profile-name").value,application:$("profile-application").value,facility:$("profile-facility").value,destinationHost:$("destination-host").value,destinationPort:Number($("destination-port").value)}); feedback("Perfil guardado.");},event.submitter);};
-$("catalog-form").onsubmit=event=>{event.preventDefault();run(async()=>{await api("/api/catalog","PUT",{code:$("test-code").value,name:$("test-name").value,unit:$("test-unit").value}); feedback("Prueba guardada. Ya puedes seleccionarla en una orden."); $("catalog-form").reset();},event.submitter);};
+$("catalog-form").onsubmit=event=>{event.preventDefault();run(async()=>{await api("/api/catalog","PUT",{code:$("test-code").value,name:$("test-name").value,unit:$("test-unit").value,valueType:$("test-type").value,reference:$("test-reference").value,flag:$("test-flag").value}); feedback("Analito guardado. Ya puedes seleccionarlo en una orden y ver su OBX en el diseño."); $("catalog-form").reset();},event.submitter);};
 $("validate").onclick=event=>run(async()=>{const response=await api("/api/validate","POST",{raw:$("raw").value}); $("validation").textContent=response.valid ? "Estructura básica válida dentro del alcance Lite." : response.errors.join(" ");},event.target);
 $("send-raw").onclick=event=>run(async()=>{const response=await api("/api/send","POST",{raw:$("raw").value}); $("raw-ack").textContent=display(response.ack); feedback(response.detail,response.status!=="ACCEPTED");},event.target);
 // Locked features only display this notice; no Premium API is called.
 $("close-premium").onclick=()=>$("premium-dialog").close();
 showPage("dashboard");
+window.refreshLite=refresh;
 refresh(true).catch(error=>feedback(error.message,true));
 setInterval(()=>{if(!busy) refresh().catch(()=>{$("connection").textContent="Sin conexión con la aplicación";$("metric-listeners").textContent="0";});},4000);

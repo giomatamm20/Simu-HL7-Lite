@@ -4,13 +4,14 @@ import os
 from pathlib import Path
 import threading
 from uuid import uuid4
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import hl7, mllp
+from . import hl7, mllp, design
 from .store import Store
 
 ROOT = Path(__file__).resolve().parent
@@ -32,6 +33,9 @@ class ManualOrder(Model):
     orderId: str = Field(default_factory=lambda: "DEMO-" + uuid4().hex[:10], min_length=1, max_length=80)
     patientId: str = Field(min_length=1, max_length=80)
     patientName: str = Field(min_length=1, max_length=100)
+    sampleId: str = Field(default="", max_length=80)
+    studyCode: str = Field(default="LAB", min_length=1, max_length=40)
+    studyName: str = Field(default="Estudio de laboratorio", min_length=1, max_length=100)
     tests: list[str] = Field(min_length=1)
 
     @field_validator("tests")
@@ -41,7 +45,7 @@ class ManualOrder(Model):
             raise ValueError("Selecciona pruebas sin repetir.")
         return tests
 
-    @field_validator("orderId", "patientId", "patientName")
+    @field_validator("orderId", "patientId", "patientName", "sampleId", "studyCode", "studyName")
     @classmethod
     def printable(cls, value):
         if any(ord(char) < 32 for char in value):
@@ -53,12 +57,42 @@ class Values(Model):
     values: dict[str, str] = Field(min_length=1)
 
 
+class SendRequest(Model):
+    values: dict[str, str] | None = None
+
+
+class FieldMapping(Model):
+    field: int = Field(ge=1, le=256, strict=True)
+    component: int | None = Field(default=None, ge=1, le=64, strict=True)
+    source: str = "fixed"
+    value: str = Field(default="", max_length=4000)
+
+
+class Segment(Model):
+    name: str = Field(pattern=r"^[A-Z][A-Z0-9]{2}$")
+    repeat: bool = False
+    fields: list[FieldMapping] = Field(default_factory=list)
+
+
+class MessageDesign(Model):
+    name: str = Field(min_length=1, max_length=100)
+    segments: list[Segment] = Field(min_length=1)
+
+
+class DesignPreview(Model):
+    design: MessageDesign
+    tests: list[str] | None = Field(default=None, min_length=1)
+
+
 class CatalogTest(Model):
     code: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.-]+$")
     name: str = Field(min_length=1, max_length=100)
     unit: str = Field(default="", max_length=60)
+    valueType: Literal["NM", "ST", "TX"] = "NM"
+    reference: str = Field(default="", max_length=100)
+    flag: Literal["", "N", "L", "H", "LL", "HH", "A"] = ""
 
-    @field_validator("name", "unit")
+    @field_validator("name", "unit", "reference")
     @classmethod
     def printable(cls, value):
         if any(ord(char) < 32 for char in value):
@@ -80,6 +114,34 @@ class Demo:
             raise
         self.thread = threading.Thread(target=self.listener.serve_forever, daemon=True)
         self.thread.start()
+
+    def require_design(self):
+        current = self.store.design()
+        if not current['configured']:
+            raise ValueError("Equipo en STANDBY: guarda y activa el único diseño HL7 desde Perfil del equipo.")
+        return current
+
+    def equipment(self):
+        configured = self.store.design()['configured']
+        orders = self.store.orders()
+        status = "STANDBY" if not configured else next((state for state in
+            ('SENDING', 'READY', 'SAMPLE_LOADED', 'PENDING', 'DRAFT') if any(order['status'] == state for order in orders)), "IDLE")
+        status = {'SENDING': 'SENDING_RESULT', 'READY': 'RESULT_READY', 'PENDING': 'WAITING_SAMPLE', 'DRAFT': 'WAITING_SAMPLE'}.get(status, status)
+        return {"state": status, "configured": configured,
+                "reason": "Guarda y activa el diseño para habilitar el flujo de órdenes." if not configured else "Diseño activo; resultados manuales."}
+
+    def save_design(self, configuration):
+        design.validate_design(configuration, self.store.profile(), self.store.catalog())
+        return self.store.save_design(configuration)
+
+    def load(self, identifier):
+        with self.store.lock:
+            self.require_design()
+            order = self.store.order(identifier)
+            if order['status'] in {'PENDING', 'DRAFT'}:
+                order['status'] = 'SAMPLE_LOADED'
+                self.store.save_order(order)
+            return order
 
     def close(self):
         self.listener.shutdown()
@@ -117,6 +179,7 @@ class Demo:
                 return reply
             try:
                 if kind == "ORM":
+                    self.require_design()
                     self.store.create_order(hl7.order_from_message(raw, self.store.catalog()))
                 reply = hl7.ack(raw, profile)
                 status, detail = "RECEIVED", "Orden pendiente de valores manuales." if kind == "ORM" else "Mensaje recibido."
@@ -130,11 +193,12 @@ class Demo:
 
     def prepare(self, identifier, values):
         with self.store.lock:
+            current = self.require_design()
             order = self.store.order(identifier)
             if order["status"] in {"SENDING", "SENT"}:
                 raise ValueError("La orden está en envío o ya fue aceptada; conserva su resultado.")
-            order["rawResult"] = hl7.result_message(self.store.profile(), order, values, self.store.catalog())
-            order.update(values=values, status="READY", lastError="")
+            order["rawResult"] = design.render(current['configuration'], self.store.profile(), order, values, self.store.catalog())
+            order.update(values=values, status="READY", lastError="", designRevision=current['revision'])
             return self.store.save_order(order)
 
     def transmit(self, raw, identifier=None):
@@ -165,9 +229,14 @@ class Demo:
                     self.store.save_order(order)
         return {"ack": reply, "status": status, "detail": detail}
 
-    def send_order(self, identifier):
+    def send_order(self, identifier, visible_values=None):
         with self.store.lock:
+            current = self.require_design()
             order = self.store.order(identifier)
+            if order.get('designRevision') != current['revision']:
+                raise ValueError("El diseño cambió. Vuelve a preparar el resultado antes de enviarlo.")
+            if visible_values is not None and visible_values != order['values']:
+                raise ValueError("Los valores visibles cambiaron. Vuelve a preparar el ORU antes de enviarlo.")
             if order["status"] != "READY":
                 raise ValueError("La orden debe tener un resultado preparado y no estar en envío.")
             order["status"] = "SENDING"
@@ -193,7 +262,7 @@ def create_app(db_path=None, listen_host=None, listen_port=None):
         finally:
             app.state.demo.close()
 
-    app = FastAPI(title="HL7 Simulator Lite", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="HL7 Simulator Lite", version="0.2.0", lifespan=lifespan)
 
     @app.middleware("http")
     async def local_ui(request: Request, call_next):
@@ -226,36 +295,58 @@ def create_app(db_path=None, listen_host=None, listen_port=None):
     @app.get("/api/state")
     def state():
         return {"edition": "Lite", "profile": demo().store.profile(), "catalog": demo().store.catalog(),
+                "design": demo().store.design(), "designSources": design.SOURCES, "equipment": demo().equipment(),
                 "orders": demo().store.orders(), "messages": demo().store.messages(),
-                "listener": {"host": demo().listener.server_address[0], "port": demo().listener.server_address[1]},
-                "limits": {"profiles": 1, "tests": None, "manualResults": True},
+                "listener": {"host": demo().listener.server_address[0], "port": demo().listener.server_address[1], "active": demo().thread.is_alive()},
+                "limits": {"profiles": 1, "designs": 1, "tests": None, "manualResults": True},
                 "premium": {"available": False, "messageOnly": True}}
 
     @app.put("/api/profile")
     def profile(payload: Profile):
-        return demo().store.save_profile(payload.model_dump())
+        return action(demo().store.save_profile, payload.model_dump())
+
+    @app.put("/api/design")
+    def save_design(payload: MessageDesign):
+        return action(demo().save_design, payload.model_dump())
+
+    @app.post("/api/design/preview")
+    def preview_design(payload: DesignPreview):
+        raw = action(design.validate_design, payload.design.model_dump(), demo().store.profile(), demo().store.catalog())
+        if payload.tests is not None:
+            by_code = {test['code']: test for test in demo().store.catalog()}
+            if len(set(payload.tests)) != len(payload.tests) or not set(payload.tests).issubset(by_code):
+                raise HTTPException(400, "Selecciona analitos únicos del catálogo para la vista previa.")
+            order, values = design.example([by_code[code] for code in payload.tests], limit=None)
+            raw = action(design.render, payload.design.model_dump(), demo().store.profile(), order, values,
+                         demo().store.catalog(), "VISTA-PREVIA", "20260101120000+0000")
+        return {"raw": raw, "example": True}
 
     @app.post("/api/orders")
     def create_order(payload: ManualOrder):
         order = payload.model_dump()
         if not set(order['tests']).issubset({test['code'] for test in demo().store.catalog()}):
             raise HTTPException(400, "Agrega primero las pruebas al catálogo.")
-        for key in ("orderId", "patientId", "patientName"):
+        action(demo().require_design)
+        for key in ("orderId", "patientId", "patientName", "sampleId", "studyCode", "studyName"):
             order[key] = hl7.scalar(order[key])
-        order.update(sampleId=order["orderId"], source="MANUAL")
+        order.update(sampleId=order["sampleId"] or order["orderId"], source="MANUAL")
         return action(demo().store.create_order, order)
 
     @app.put("/api/catalog")
     def save_test(payload: CatalogTest):
         return demo().store.save_test(payload.model_dump())
 
+    @app.post("/api/orders/{identifier:path}/load")
+    def load(identifier: str):
+        return action(demo().load, identifier)
+
     @app.post("/api/orders/{identifier:path}/results")
     def prepare(identifier: str, payload: Values):
         return action(demo().prepare, identifier, payload.values)
 
     @app.post("/api/orders/{identifier:path}/send")
-    def send_order(identifier: str):
-        return action(demo().send_order, identifier)
+    def send_order(identifier: str, payload: SendRequest):
+        return action(demo().send_order, identifier, payload.values)
 
     @app.post("/api/validate")
     def validate(payload: Message):
